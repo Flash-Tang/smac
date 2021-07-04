@@ -15,7 +15,8 @@ def parse_args():
     parser = argparse.ArgumentParser("Reinforcement Learning experiments for multiagent environments")
     # Environment
     # parser.add_argument("--scenario", type=str, default="simple", help="name of the scenario script")
-    parser.add_argument("--max-episode-len", type=int, default=25, help="maximum episode length")
+    # TODO(alan): change to pass from smac_maps's config
+    parser.add_argument("--max-episode-len", type=int, default=60, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument("--num-adversaries", type=int, default=0, help="number of adversaries")
     parser.add_argument("--good-policy", type=str, default="maddpg", help="policy for good agents")
@@ -28,7 +29,7 @@ def parse_args():
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='maddpg_in_smac', help="name of the experiment")
     parser.add_argument("--save-dir", type=str, default="/tmp/policy/", help="directory in which training state and model should be saved")
-    parser.add_argument("--save-rate", type=int, default=1000, help="save model once every time this many episodes are completed")
+    parser.add_argument("--save-rate", type=int, default=100, help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="", help="directory in which training state and model are loaded")
     # Evaluation
     parser.add_argument("--restore", action="store_true", default=False)
@@ -77,7 +78,7 @@ def get_trainers(env, n_agents, obs_shape_n, arglist):
 def train(arglist):
     with U.single_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="8m")
+        env = StarCraft2Env(map_name="3m")
         env_info = env.get_env_info()
 
         n_actions = env_info["n_actions"]
@@ -115,12 +116,13 @@ def train(arglist):
         while True:
             obs_n = env.get_obs()
             # get action
-            action_n = [agent.action(obs) for agent, obs in zip(trainers,obs_n)]
-            action_n = [np.argmax(action_ar) for action_ar in action_n]
-            action_n = [action if env.get_avail_agent_actions(agent)[action] else 0 for agent, action in enumerate(action_n)]
+            action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
+            action_for_smac = [np.argmax(action_ar) for action_ar in action_n]
+            action_for_smac = [action if env.get_avail_agent_actions(agent)[action] else 1 for agent, action in enumerate(action_for_smac)]
+            action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in enumerate(action_for_smac)]
             # environment step
-            new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            rew, terminal, _ = env.step(obs_n)
+            # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
+            rew, terminal, _ = env.step(action_for_smac)
             rew_n = [(rew / n_agents) for _ in range(n_agents)]
             new_obs_n = env.get_obs()
             # TODO(alan): check done_n's implementation
@@ -183,8 +185,8 @@ def train(arglist):
                 #         train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
                 # else:
                 print("steps: {}, episodes: {}, mean episode reward: {}, agent episode reward: {}, time: {}".format(
-                        train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]),
-                        [np.mean(rew[-arglist.save_rate:]) for rew in agent_rewards], round(time.time()-t_start, 3)))
+                        train_step, len(episode_rewards), round(np.mean(episode_rewards[-arglist.save_rate:]), 1),
+                        [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in agent_rewards], round(time.time()-t_start, 3)))
                 t_start = time.time()
                 # Keep track of final episode reward
                 final_ep_rewards.append(np.mean(episode_rewards[-arglist.save_rate:]))
@@ -201,6 +203,7 @@ def train(arglist):
                     pickle.dump(final_ep_ag_rewards, fp)
                 print('...Finished total of {} episodes.'.format(len(episode_rewards)))
                 break
+    env.close()
 
 if __name__ == '__main__':
     arglist = parse_args()
