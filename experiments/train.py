@@ -16,7 +16,7 @@ def parse_args():
     # Environment
     # parser.add_argument("--scenario", type=str, default="simple", help="name of the scenario script")
     # TODO(alan): change to pass from smac_maps's config
-    parser.add_argument("--max-episode-len", type=int, default=60, help="maximum episode length")
+    parser.add_argument("--max-episode-len", type=int, default=150, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
     parser.add_argument("--num-adversaries", type=int, default=0, help="number of adversaries")
     parser.add_argument("--good-policy", type=str, default="maddpg", help="policy for good agents")
@@ -78,7 +78,7 @@ def get_trainers(env, n_agents, obs_shape_n, arglist):
 def train(arglist):
     with U.single_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="3m")
+        env = StarCraft2Env(map_name="MMM")
         env_info = env.get_env_info()
 
         n_actions = env_info["n_actions"]
@@ -102,6 +102,9 @@ def train(arglist):
             U.load_state(arglist.load_dir)
 
         episode_rewards = [0.0]  # sum of rewards for all agents
+        episode_win = []
+        episode_killing = []
+        episode_remaining = []
         agent_rewards = [[0.0] for _ in range(n_agents)]  # individual agent reward
         final_ep_rewards = []  # sum of rewards for training curve
         final_ep_ag_rewards = []  # agent rewards for training curve
@@ -118,14 +121,14 @@ def train(arglist):
             # get action
             action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
             action_for_smac = [np.argmax(action_ar) for action_ar in action_n]
-            action_for_smac = [action if env.get_avail_agent_actions(agent)[action] else 1 for agent, action in enumerate(action_for_smac)]
+            action_for_smac = [action if env.get_avail_agent_actions(agent)[action] else np.nonzero(env.get_avail_agent_actions(agent))[0][-1] for agent, action in enumerate(action_for_smac)]
             action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in enumerate(action_for_smac)]
             # environment step
             # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            rew, terminal, _ = env.step(action_for_smac)
+            rew, terminal, info = env.step(action_for_smac)
+            # TODO(alan): set individual reward
             rew_n = [(rew / n_agents) for _ in range(n_agents)]
             new_obs_n = env.get_obs()
-            # TODO(alan): check done_n's implementation
             done_n = [False for _ in range(n_agents)]
             episode_step += 1
             done = all(done_n)
@@ -140,6 +143,13 @@ def train(arglist):
                 agent_rewards[i][-1] += rew
 
             if done or terminal:
+                game_restart = not ('dead_enemies' in info.keys())
+                enemy_killed_num = info.get('dead_enemies', 0)
+                self_left_num = n_agents - info.get('dead_allies', 0)
+                if not game_restart:
+                    episode_killing.append(enemy_killed_num)
+                    episode_remaining.append(self_left_num)
+                    episode_win.append(1 if info['battle_won'] else 0)
                 env.reset()
                 episode_step = 0
                 episode_rewards.append(0)
@@ -184,9 +194,17 @@ def train(arglist):
                 #     print("steps: {}, episodes: {}, mean episode reward: {}, time: {}".format(
                 #         train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
                 # else:
-                print("steps: {}, episodes: {}, mean episode reward: {}, agent episode reward: {}, time: {}".format(
-                        train_step, len(episode_rewards), round(np.mean(episode_rewards[-arglist.save_rate:]), 1),
-                        [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in agent_rewards], round(time.time()-t_start, 3)))
+                print("steps: {}, episodes: {}, mean won rate: {}, mean episode reward: {}, agent episode reward: {}, mean episode killing: {}, mean_epsode remaining: {}, time: {}".format(
+                        train_step, len(episode_rewards),
+                        round(np.mean(episode_win[-arglist.save_rate:]), 2),
+                        round(np.mean(episode_rewards[-arglist.save_rate:]), 1),
+                        [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in agent_rewards],
+                        round(np.mean(episode_killing[-arglist.save_rate:]), 2),
+                        round(np.mean(episode_remaining[-arglist.save_rate:]), 2),
+                        round(time.time()-t_start, 2)))
+
+                env.save_replay(round(np.mean(episode_win[-arglist.save_rate:]), 2))
+
                 t_start = time.time()
                 # Keep track of final episode reward
                 final_ep_rewards.append(np.mean(episode_rewards[-arglist.save_rate:]))
