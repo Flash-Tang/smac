@@ -698,13 +698,18 @@ class StarCraft2Env(MultiAgentEnv):
         neg_scale = self.reward_negative_scale
 
         # update deaths
+        weakest_al = -1
+        weakest_al_health = 10000
         for al_id, al_unit in self.agents.items():
-            if not self.death_tracker_ally[al_id]:
+            if not self.death_tracker_ally[al_id] and al_id != self.n_agents - 1:
                 # did not die so far
                 prev_health = (
                     self.previous_ally_units[al_id].health
                     + self.previous_ally_units[al_id].shield
                 )
+                if prev_health < weakest_al_health:
+                    weakest_al = al_id
+                    weakest_al_health = prev_health
                 if al_unit.health == 0:
                     # just died
                     self.death_tracker_ally[al_id] = 1
@@ -716,6 +721,8 @@ class StarCraft2Env(MultiAgentEnv):
                     delta_ally += neg_scale * (
                         prev_health - al_unit.health - al_unit.shield
                     )
+        if action_n[-1] - self.n_actions_no_attack == weakest_al:
+            reward_n[-1] = 10
 
         for e_id, e_unit in self.enemies.items():
             delta_enemy = 0
@@ -732,7 +739,7 @@ class StarCraft2Env(MultiAgentEnv):
                 else:
                     delta_enemy += prev_health - e_unit.health - e_unit.shield
                 for agent, action in enumerate(action_n):
-                    if action == self.n_actions_no_attack + e_id:
+                    if action == self.n_actions_no_attack + e_id and agent != self.n_agents - 1:
                         reward_n[agent] += abs(delta_enemy + delta_deaths)
 
         if self.reward_only_positive:
