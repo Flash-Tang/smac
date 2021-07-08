@@ -125,9 +125,10 @@ def train(arglist):
             action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in enumerate(action_for_smac)]
             # environment step
             # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            rew, terminal, info = env.step(action_for_smac)
+            rew_n, terminal, info = env.step(action_for_smac)
+            rew_n = list(rew_n)
             # TODO(alan): set individual reward
-            rew_n = [(rew / n_agents) for _ in range(n_agents)]
+            # rew_n = [(rew / n_agents) for _ in range(n_agents)]
             new_obs_n = env.get_obs()
             done_n = [False for _ in range(n_agents)]
             episode_step += 1
@@ -138,6 +139,7 @@ def train(arglist):
                 agent.experience(obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
             # obs_n = new_obs_n
 
+            # print(f'at ep {len(episode_rewards)} rew_n len: {len(rew_n)}')
             for i, rew in enumerate(rew_n):
                 episode_rewards[-1] += rew
                 agent_rewards[i][-1] += rew

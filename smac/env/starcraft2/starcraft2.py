@@ -423,7 +423,7 @@ class StarCraft2Env(MultiAgentEnv):
             self._obs = self._controller.observe()
         except (protocol.ProtocolError, protocol.ConnectionError):
             self.full_restart()
-            return 0, True, {}
+            return [0] * self.n_agents, True, {}
 
         self._total_steps += 1
         self._episode_steps += 1
@@ -432,7 +432,8 @@ class StarCraft2Env(MultiAgentEnv):
         game_end_code = self.update_units()
 
         terminated = False
-        reward = self.reward_battle()
+        reward_n = self.reward_battle(actions)
+        reward_n = np.array(reward_n)
         info = {"battle_won": False}
 
         # count units that are still alive
@@ -456,13 +457,14 @@ class StarCraft2Env(MultiAgentEnv):
                 self.win_counted = True
                 info["battle_won"] = True
                 if not self.reward_sparse:
-                    reward += self.reward_win
+                    # TODO(alan): considering reward_win only for alive agents
+                    reward_n += self.reward_win / self.n_agents
                 else:
                     reward = 1
             elif game_end_code == -1 and not self.defeat_counted:
                 self.defeat_counted = True
                 if not self.reward_sparse:
-                    reward += self.reward_defeat
+                    reward_n += self.reward_defeat / self.n_agents
                 else:
                     reward = -1
 
@@ -481,9 +483,10 @@ class StarCraft2Env(MultiAgentEnv):
             self._episode_count += 1
 
         if self.reward_scale:
-            reward /= self.max_reward / self.reward_scale_rate
+            # reward_n /= [self.max_reward / self.reward_scale_rate] * self.n_agents
+            pass
 
-        return reward, terminated, info
+        return reward_n, terminated, info
 
     def get_agent_action(self, a_id, action):
         """Construct the action for agent a_id."""
@@ -677,7 +680,7 @@ class StarCraft2Env(MultiAgentEnv):
         sc_action = sc_pb.Action(action_raw=r_pb.ActionRaw(unit_command=cmd))
         return sc_action, action_num
 
-    def reward_battle(self):
+    def reward_battle(self, action_n):
         """Reward function when self.reward_spare==False.
         Returns accumulative hit/shield point damage dealt to the enemy
         + reward_death_value per enemy unit killed, and, in case
@@ -688,9 +691,9 @@ class StarCraft2Env(MultiAgentEnv):
             return 0
 
         reward = 0
-        delta_deaths = 0
+        reward_n = [0.0] * self.n_agents
         delta_ally = 0
-        delta_enemy = 0
+        delta_deaths = 0
 
         neg_scale = self.reward_negative_scale
 
@@ -715,6 +718,8 @@ class StarCraft2Env(MultiAgentEnv):
                     )
 
         for e_id, e_unit in self.enemies.items():
+            delta_enemy = 0
+            delta_deaths = 0
             if not self.death_tracker_enemy[e_id]:
                 prev_health = (
                     self.previous_enemy_units[e_id].health
@@ -722,17 +727,21 @@ class StarCraft2Env(MultiAgentEnv):
                 )
                 if e_unit.health == 0:
                     self.death_tracker_enemy[e_id] = 1
-                    delta_deaths += self.reward_death_value
-                    delta_enemy += prev_health
+                    delta_deaths = self.reward_death_value
+                    delta_enemy = prev_health
                 else:
                     delta_enemy += prev_health - e_unit.health - e_unit.shield
+                for agent, action in enumerate(action_n):
+                    if action == self.n_actions_no_attack + e_id:
+                        reward_n[agent] += abs(delta_enemy + delta_deaths)
 
         if self.reward_only_positive:
-            reward = abs(delta_enemy + delta_deaths)  # shield regeneration
+            # reward = abs(delta_enemy + delta_deaths)  # shield regeneration
+            pass
         else:
             reward = delta_enemy + delta_deaths - delta_ally
 
-        return reward
+        return reward_n
 
     def get_total_actions(self):
         """Returns the total number of actions an agent could ever take."""
