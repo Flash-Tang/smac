@@ -722,6 +722,7 @@ class StarCraft2Env(MultiAgentEnv):
                         prev_health - al_unit.health - al_unit.shield
                     )
         if action_n[-1] - self.n_actions_no_attack == weakest_al:
+            # print(f'medivac target: {action_n[-1] - self.n_actions_no_attack}, weakest_al: {weakest_al}, weakest_health: {weakest_al_health}')
             reward_n[-1] = 10
 
         for e_id, e_unit in self.enemies.items():
@@ -738,8 +739,8 @@ class StarCraft2Env(MultiAgentEnv):
                     delta_enemy = prev_health
                 else:
                     delta_enemy += prev_health - e_unit.health - e_unit.shield
-                for agent, action in enumerate(action_n):
-                    if action == self.n_actions_no_attack + e_id and agent != self.n_agents - 1:
+                for agent, action in enumerate(action_n[:-1]):
+                    if action == self.n_actions_no_attack + e_id:
                         reward_n[agent] += abs(delta_enemy + delta_deaths)
 
         if self.reward_only_positive:
