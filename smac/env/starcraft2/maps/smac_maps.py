@@ -221,6 +221,15 @@ map_param_registry = {
         "unit_type_bits": 0,
         "map_type": "colossus",
     },
+    "10m": {
+        "n_agents": 10,
+        "n_enemies": 10,
+        "limit": 60,
+        "a_race": "T",
+        "b_race": "T",
+        "unit_type_bits": 0,
+        "map_type": "marines",
+    },
 }
 
 

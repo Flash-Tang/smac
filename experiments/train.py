@@ -76,12 +76,12 @@ def get_trainers(env, n_agents, obs_shape_n, arglist):
 
 
 def train(arglist):
+    # TODO(alan) : Set multi-cpu to boost training
     with U.single_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="MMM")
+        env = StarCraft2Env(map_name="MMM", difficulty='4')
         env_info = env.get_env_info()
 
-        n_actions = env_info["n_actions"]
         n_agents = env_info["n_agents"]
         # env = make_env(arglist.scenario, arglist, arglist.benchmark)
 

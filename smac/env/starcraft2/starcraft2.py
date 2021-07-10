@@ -16,6 +16,8 @@ from absl import logging
 from pysc2 import maps
 from pysc2 import run_configs
 from pysc2.lib import protocol
+from pysc2.lib import portspicker
+from pysc2.lib import run_parallel
 
 from s2clientprotocol import common_pb2 as sc_common
 from s2clientprotocol import sc2api_pb2 as sc_pb
@@ -69,6 +71,7 @@ class StarCraft2Env(MultiAgentEnv):
         step_mul=8,
         move_amount=2,
         difficulty="7",
+        policy_agents_num=1,
         game_version=None,
         seed=None,
         continuing_episode=False,
@@ -202,6 +205,7 @@ class StarCraft2Env(MultiAgentEnv):
         self._move_amount = move_amount
         self._step_mul = step_mul
         self.difficulty = difficulty
+        self.policy_agents_num = policy_agents_num
 
         # Observations and state
         self.obs_own_health = obs_own_health
@@ -284,20 +288,30 @@ class StarCraft2Env(MultiAgentEnv):
         self.pathing_grid = None
         self._run_config = None
         self._sc2_proc = None
-        self._controller = None
+        self._controllers = None
+        self._parallel = run_parallel.RunParallel()
 
         # Try to avoid leaking SC2 processes on shutdown
         atexit.register(lambda: self.close())
 
     def _launch(self):
         """Launch the StarCraft II game."""
+        if self.policy_agents_num > 1:
+            self._ports = portspicker.pick_unused_ports(self.policy_agents_num * 2)
+        else:
+            self._ports = []
+
         self._run_config = run_configs.get(version=self.game_version)
         _map = maps.get(self.map_name)
 
         # Setting up the interface
         interface_options = sc_pb.InterfaceOptions(raw=True, score=False)
-        self._sc2_proc = self._run_config.start(window_size=self.window_size, want_rgb=False)
-        self._controller = self._sc2_proc.controller
+        self._sc2_proc = [
+            self._run_config.start(window_size=self.window_size, want_rgb=False,
+                                   extra_ports=self._ports)
+            for _ in range(self.policy_agents_num)]
+        # self._controller = self._sc2_proc.controller
+        self._controllers = [p.controller for p in self._sc2_proc]
 
         # Request to create the game
         create = sc_pb.RequestCreateGame(
@@ -307,15 +321,36 @@ class StarCraft2Env(MultiAgentEnv):
             realtime=False,
             random_seed=self._seed)
         create.player_setup.add(type=sc_pb.Participant)
-        create.player_setup.add(type=sc_pb.Computer, race=races[self._bot_race],
-                                difficulty=difficulties[self.difficulty])
-        self._controller.create_game(create)
+        if self.policy_agents_num == 1:
+            create.player_setup.add(type=sc_pb.Computer, race=races[self._bot_race],
+                                    difficulty=difficulties[self.difficulty])
+        else:
+            create.player_setup.add(type=sc_pb.Participant)
 
-        join = sc_pb.RequestJoinGame(race=races[self._agent_race],
-                                     options=interface_options)
-        self._controller.join_game(join)
+        self._controllers[0].create_game(create)
 
-        game_info = self._controller.game_info()
+        join_reqs = []
+        for j in range(self.policy_agents_num):
+            join = sc_pb.RequestJoinGame(options=interface_options)
+            join.race = races[self._agent_race]
+            join.player_name = f'player{j}'
+            if self._ports:
+                join.shared_port = 0  # unused
+                join.server_ports.game_port = self._ports[0]
+                join.server_ports.base_port = self._ports[1]
+                for i in range(self.policy_agents_num - 1):
+                    join.client_ports.add(game_port=self._ports[i * 2 + 2],
+                                          base_port=self._ports[i * 2 + 3])
+            join_reqs.append(join)
+
+        self._parallel.run((c.join_game, join)
+                           for c, join in zip(self._controllers, join_reqs))
+
+        # join = sc_pb.RequestJoinGame(race=races[self._agent_race],
+        #                              options=interface_options)
+        # self._controller.join_game(join)
+        # TODO(alan): TBD
+        game_info = self._controllers[0].game_info()
         map_info = game_info.start_raw
         map_play_area_min = map_info.playable_area.p0
         map_play_area_max = map_info.playable_area.p1
@@ -364,7 +399,8 @@ class StarCraft2Env(MultiAgentEnv):
             self.heuristic_targets = [None] * self.n_agents
 
         try:
-            self._obs = self._controller.observe()
+            # TODO(alan): TBD
+            self._obs = self._controllers[0].observe()
             self.init_units()
         except (protocol.ProtocolError, protocol.ConnectionError):
             self.full_restart()
@@ -382,13 +418,15 @@ class StarCraft2Env(MultiAgentEnv):
         """
         try:
             self._kill_all_units()
-            self._controller.step(2)
+            # TODO(alan): TBD
+            self._controllers[0].step(2)
         except (protocol.ProtocolError, protocol.ConnectionError):
             self.full_restart()
 
     def full_restart(self):
         """Full restart. Closes the SC2 process and launches a new one. """
-        self._sc2_proc.close()
+        for proc in self._sc2_proc:
+            proc.close()
         self._launch()
         self.force_restarts += 1
 
@@ -416,11 +454,12 @@ class StarCraft2Env(MultiAgentEnv):
         # Send action request
         req_actions = sc_pb.RequestAction(actions=sc_actions)
         try:
-            self._controller.actions(req_actions)
+            # TODO(alan): TBD
+            self._controllers[0].actions(req_actions)
             # Make step in SC2, i.e. apply actions
-            self._controller.step(self._step_mul)
+            self._controllers[0].step(self._step_mul)
             # Observe here so that we know if the episode is over.
-            self._obs = self._controller.observe()
+            self._obs = self._controllers[0].observe()
         except (protocol.ProtocolError, protocol.ConnectionError):
             self.full_restart()
             return [0] * self.n_agents, True, {}
@@ -788,8 +827,9 @@ class StarCraft2Env(MultiAgentEnv):
         prefix = self.replay_prefix or self.map_name
         prefix += str(win_rate)
         replay_dir = self.replay_dir or ""
+        # TODO(alan): TBD
         replay_path = self._run_config.save_replay(
-            self._controller.save_replay(), replay_dir=replay_dir, prefix=prefix)
+            self._controllers[0].save_replay(), replay_dir=replay_dir, prefix=prefix)
         logging.info("Replay saved at: %s" % replay_path)
 
     def unit_max_shield(self, unit):
@@ -864,7 +904,7 @@ class StarCraft2Env(MultiAgentEnv):
         ]
         return vals
 
-    def get_obs_agent(self, agent_id):
+    def get_obs_agent(self, agent_id, side='red'):
         """Returns observation for agent_id. The observation is composed of:
 
            - agent movement features (where it can move to, height information and pathing grid)
@@ -889,7 +929,10 @@ class StarCraft2Env(MultiAgentEnv):
            NOTE: Agents should have access only to their local observations
            during decentralised execution.
         """
-        unit = self.get_unit_by_id(agent_id)
+        if side == 'red':
+            unit = self.get_unit_by_id(agent_id)
+        elif side == 'blue':
+            unit = self.get_unit_by_id(agent_id, blue_side=True)
 
         move_feats_dim = self.get_obs_move_feats_size()
         enemy_feats_dim = self.get_obs_enemy_feats_size()
@@ -923,7 +966,11 @@ class StarCraft2Env(MultiAgentEnv):
                 move_feats[ind:] = self.get_surrounding_height(unit)
 
             # Enemy features
-            for e_id, e_unit in self.enemies.items():
+            if side == 'red':
+                enemy_group = self.blue_agents
+            elif side == 'blue':
+                enemy_group = self.red_agents
+            for e_id, e_unit in enemy_group.items():
                 e_x = e_unit.pos.x
                 e_y = e_unit.pos.y
                 dist = self.distance(x, y, e_x, e_y)
@@ -965,8 +1012,10 @@ class StarCraft2Env(MultiAgentEnv):
                 al_id for al_id in range(self.n_agents) if al_id != agent_id
             ]
             for i, al_id in enumerate(al_ids):
-
-                al_unit = self.get_unit_by_id(al_id)
+                if side == 'red':
+                    al_unit = self.get_unit_by_id(al_id)
+                elif side == 'blue':
+                    al_unit = self.get_unit_by_id(al_id, blue_side=True)
                 al_x = al_unit.pos.x
                 al_y = al_unit.pos.y
                 dist = self.distance(x, y, al_x, al_y)
@@ -1009,7 +1058,7 @@ class StarCraft2Env(MultiAgentEnv):
                     max_shield = self.unit_max_shield(unit)
                     own_feats[ind] = unit.shield / max_shield
                     ind += 1
-
+            # TODO(alan): 'check if code change needed'
             if self.unit_type_bits > 0:
                 type_id = self.get_unit_type_id(unit, True)
                 own_feats[ind + type_id] = 1
@@ -1043,8 +1092,12 @@ class StarCraft2Env(MultiAgentEnv):
         NOTE: Agents should have access only to their local observations
         during decentralised execution.
         """
-        agents_obs = [self.get_obs_agent(i) for i in range(self.n_agents)]
-        return agents_obs
+        red_side_obs = [self.get_obs_agent(i) for i in range(self.n_agents)]
+        if self.policy_agents_num == 1:
+            return [red_side_obs, []]
+        if self.policy_agents_num > 1:
+            blue_side_obs = [self.get_obs_agent(i, side='blue') for i in range(self.n_agents)]
+            return [red_side_obs, blue_side_obs]
 
     def get_state(self):
         """Returns the global state.
@@ -1301,9 +1354,12 @@ class StarCraft2Env(MultiAgentEnv):
 
         return type_id
 
-    def get_avail_agent_actions(self, agent_id):
+    def get_avail_agent_actions(self, agent_id, side='red'):
         """Returns the available actions for agent_id."""
-        unit = self.get_unit_by_id(agent_id)
+        if side == 'red':
+            unit = self.get_unit_by_id(agent_id)
+        elif side == 'blue':
+            unit = self.get_unit_by_id(agent_id, blue_side=True)
         if unit.health > 0:
             # cannot choose no-op when alive
             avail_actions = [0] * self.n_actions
@@ -1324,12 +1380,17 @@ class StarCraft2Env(MultiAgentEnv):
             # Can attack only alive units that are alive in the shooting range
             shoot_range = self.unit_shoot_range(agent_id)
 
-            target_items = self.enemies.items()
+            if side == 'red':
+                target_items = self.enemies.items()
+                self_side = self.red_agents
+            elif side == 'blue':
+                target_items = self.red_agents.items()
+                self_side = self.blue_agents
             if self.map_type == "MMM" and unit.unit_type == self.medivac_id:
                 # Medivacs cannot heal themselves or other flying units
                 target_items = [
                     (t_id, t_unit)
-                    for (t_id, t_unit) in self.agents.items()
+                    for (t_id, t_unit) in self_side.items()
                     if t_unit.unit_type != self.medivac_id
                 ]
 
@@ -1358,7 +1419,8 @@ class StarCraft2Env(MultiAgentEnv):
     def close(self):
         """Close StarCraft II."""
         if self._sc2_proc:
-            self._sc2_proc.close()
+            for proc in self._sc2_proc:
+                proc.close()
 
     def seed(self):
         """Returns the random seed used by the environment."""
@@ -1376,7 +1438,8 @@ class StarCraft2Env(MultiAgentEnv):
         debug_command = [
             d_pb.DebugCommand(kill_unit=d_pb.DebugKillUnit(tag=units_alive))
         ]
-        self._controller.debug(debug_command)
+        # TODO(alan): TBD
+        self._controllers[0].debug(debug_command)
 
     def init_units(self):
         """Initialise the units."""
@@ -1407,12 +1470,15 @@ class StarCraft2Env(MultiAgentEnv):
                             self.agents[i].pos.y,
                         )
                     )
-
+            # TODO(alan): Is sorting enemies unit necessary
             for unit in self._obs.observation.raw_data.units:
                 if unit.owner == 2:
                     self.enemies[len(self.enemies)] = unit
                     if self._episode_count == 0:
                         self.max_reward += unit.health_max + unit.shield_max
+
+            self.red_agents = self.agents
+            self.blue_agents = self.enemies
 
             if self._episode_count == 0:
                 min_unit_type = min(
@@ -1427,8 +1493,9 @@ class StarCraft2Env(MultiAgentEnv):
                 return
 
             try:
-                self._controller.step(1)
-                self._obs = self._controller.observe()
+                # TODO(alan): TBD
+                self._controllers[0].step(1)
+                self._obs = self._controllers[0].observe()
             except (protocol.ProtocolError, protocol.ConnectionError):
                 self.full_restart()
                 self.reset()
@@ -1533,9 +1600,16 @@ class StarCraft2Env(MultiAgentEnv):
                 return True
             return False
 
-    def get_unit_by_id(self, a_id):
+    def get_unit_by_id(self, a_id, blue_side=False):
         """Get unit by ID."""
-        return self.agents[a_id]
+        if not blue_side:
+            return self.agents[a_id]
+        else:
+            return self.blue_agents[a_id]
+
+
+    def get_unit_by_id_blue(self, blue_a_id):
+        return self.blue_agents[blue_a_id]
 
     def get_stats(self):
         stats = {
