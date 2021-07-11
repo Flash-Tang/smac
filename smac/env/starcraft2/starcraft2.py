@@ -432,32 +432,47 @@ class StarCraft2Env(MultiAgentEnv):
 
     def step(self, actions):
         """A single environment step. Returns reward, terminated, info."""
-        actions_int = [int(a) for a in actions]
+        actions_int_both_sides = []
+        actions_int_red = [int(a) for a in actions[0]]
+        actions_int_both_sides.append(actions_int_red)
+        if len(actions) == 2:
+            actions_int_blue = [int(a) for a in actions[1]]
+            actions_int_both_sides.append(actions_int_blue)
 
-        self.last_action = np.eye(self.n_actions)[np.array(actions_int)]
+        # not used
+        self.last_action = np.eye(self.n_actions)[np.array(actions_int_red)]
 
         # Collect individual actions
-        sc_actions = []
+        sc_actions_both_sides = []
         if self.debug:
             logging.debug("Actions".center(60, "-"))
 
-        for a_id, action in enumerate(actions_int):
-            if not self.heuristic_ai:
-                sc_action = self.get_agent_action(a_id, action)
-            else:
-                sc_action, action_num = self.get_agent_action_heuristic(
-                    a_id, action)
-                actions[a_id] = action_num
-            if sc_action:
-                sc_actions.append(sc_action)
+        for i in range(len(actions_int_both_sides)):
+            sc_actions = []
+            for a_id, action in enumerate(actions_int_both_sides[i]):
+                if not self.heuristic_ai:
+                    if i == 1:
+                        sc_action = self.get_agent_action(a_id, action, side='blue')
+                    else:
+                        sc_action = self.get_agent_action(a_id, action)
+                else:
+                    sc_action, action_num = self.get_agent_action_heuristic(
+                        a_id, action)
+                    actions[a_id] = action_num
+                if sc_action:
+                    sc_actions.append(sc_action)
+            sc_actions_both_sides.append(sc_actions)
 
         # Send action request
-        req_actions = sc_pb.RequestAction(actions=sc_actions)
+        # req_actions = sc_pb.RequestAction(actions=sc_actions_both_sides[0])
+        self._parallel.run((c.actions, sc_pb.RequestAction(actions=a))
+                           for c, a in zip(self._controllers, sc_actions_both_sides))
         try:
             # TODO(alan): TBD
-            self._controllers[0].actions(req_actions)
+            # self._controllers[0].actions(req_actions)
             # Make step in SC2, i.e. apply actions
-            self._controllers[0].step(self._step_mul)
+            # self._controllers[0].step(self._step_mul)
+            self._parallel.run((c.step, self._step_mul) for c in self._controllers)
             # Observe here so that we know if the episode is over.
             self._obs = self._controllers[0].observe()
         except (protocol.ProtocolError, protocol.ConnectionError):
@@ -471,7 +486,7 @@ class StarCraft2Env(MultiAgentEnv):
         game_end_code = self.update_units()
 
         terminated = False
-        reward_n = self.reward_battle(actions)
+        reward_n = self.reward_battle(actions_int_both_sides[0])
         reward_n = np.array(reward_n)
         info = {"battle_won": False}
 
@@ -527,13 +542,16 @@ class StarCraft2Env(MultiAgentEnv):
 
         return reward_n, terminated, info
 
-    def get_agent_action(self, a_id, action):
+    def get_agent_action(self, a_id, action, side='red'):
         """Construct the action for agent a_id."""
-        avail_actions = self.get_avail_agent_actions(a_id)
+        avail_actions = self.get_avail_agent_actions(a_id, side)
         assert avail_actions[action] == 1, \
                 "Agent {} cannot perform action {}".format(a_id, action)
 
-        unit = self.get_unit_by_id(a_id)
+        if side == 'blue':
+            unit = self.get_unit_by_id(a_id, blue_side=True)
+        elif side == 'red':
+            unit = self.get_unit_by_id(a_id)
         tag = unit.tag
         x = unit.pos.x
         y = unit.pos.y
@@ -599,11 +617,15 @@ class StarCraft2Env(MultiAgentEnv):
         else:
             # attack/heal units that are in range
             target_id = action - self.n_actions_no_attack
+            if side == 'red':
+                self_group, enemy_group = self.red_agents, self.blue_agents
+            elif side == 'blue':
+                self_group, enemy_group = self.blue_agents, self.red_agents
             if self.map_type == "MMM" and unit.unit_type == self.medivac_id:
-                target_unit = self.agents[target_id]
+                target_unit = self_group[target_id]
                 action_name = "heal"
             else:
-                target_unit = self.enemies[target_id]
+                target_unit = enemy_group[target_id]
                 action_name = "attack"
 
             action_id = actions[action_name]
