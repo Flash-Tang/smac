@@ -77,9 +77,9 @@ def get_trainers(env, n_agents, obs_shape_n, arglist):
 
 def train(arglist):
     # TODO(alan) : Set multi-cpu to boost training
-    with U.single_threaded_session():
+    with U.multi_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="MMM", difficulty='4')
+        env = StarCraft2Env(map_name="MMM", difficulty='5')
         env_info = env.get_env_info()
 
         n_agents = env_info["n_agents"]
@@ -117,7 +117,7 @@ def train(arglist):
 
         print('Starting iterations...')
         while True:
-            obs_n = env.get_obs()
+            obs_n, _ = env.get_obs()
             # get action
             action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
             action_for_smac = [np.argmax(action_ar) for action_ar in action_n]
@@ -125,11 +125,11 @@ def train(arglist):
             action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in enumerate(action_for_smac)]
             # environment step
             # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            rew_n, terminal, info = env.step(action_for_smac)
+            rew_n, terminal, info = env.step([action_for_smac])
             rew_n = list(rew_n)
             # TODO(alan): set individual reward
             # rew_n = [(rew / n_agents) for _ in range(n_agents)]
-            new_obs_n = env.get_obs()
+            new_obs_n, _ = env.get_obs()
             done_n = [False for _ in range(n_agents)]
             episode_step += 1
             done = all(done_n)
@@ -189,7 +189,7 @@ def train(arglist):
 
             # save model, display training output
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
-                U.save_state(arglist.save_dir, saver=saver)
+                U.save_state(arglist.save_dir, round(np.mean(episode_win[-arglist.save_rate:]), 2), saver)
                 # TODO(alan): check the difference
                 # print statement depends on whether or not there are adversaries
                 # if num_adversaries == 0:
