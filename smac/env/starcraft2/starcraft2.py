@@ -465,11 +465,12 @@ class StarCraft2Env(MultiAgentEnv):
 
         # Send action request
         # req_actions = sc_pb.RequestAction(actions=sc_actions_both_sides[0])
-        self._parallel.run((c.actions, sc_pb.RequestAction(actions=a))
-                           for c, a in zip(self._controllers, sc_actions_both_sides))
+
         try:
             # TODO(alan): TBD
             # self._controllers[0].actions(req_actions)
+            self._parallel.run((c.actions, sc_pb.RequestAction(actions=a))
+                               for c, a in zip(self._controllers, sc_actions_both_sides))
             # Make step in SC2, i.e. apply actions
             # self._controllers[0].step(self._step_mul)
             self._parallel.run((c.step, self._step_mul) for c in self._controllers)
@@ -972,7 +973,10 @@ class StarCraft2Env(MultiAgentEnv):
             sight_range = self.unit_sight_range(agent_id)
 
             # Movement features
-            avail_actions = self.get_avail_agent_actions(agent_id)
+            if side == 'red':
+                avail_actions = self.get_avail_agent_actions(agent_id)
+            elif side == 'blue':
+                avail_actions = self.get_avail_agent_actions(agent_id, side='blue')
             for m in range(self.n_actions_move):
                 move_feats[m] = avail_actions[m + 2]
 
@@ -1064,7 +1068,11 @@ class StarCraft2Env(MultiAgentEnv):
                             ind += 1
 
                     if self.unit_type_bits > 0:
-                        type_id = self.get_unit_type_id(al_unit, True)
+                        # Check why unit_type of both sides are different
+                        if side == 'red':
+                            type_id = self.get_unit_type_id(al_unit, True)
+                        elif side == 'blue':
+                            type_id = self.get_unit_type_id(al_unit, False)
                         ally_feats[i, ind + type_id] = 1
                         ind += self.unit_type_bits
 
@@ -1080,9 +1088,12 @@ class StarCraft2Env(MultiAgentEnv):
                     max_shield = self.unit_max_shield(unit)
                     own_feats[ind] = unit.shield / max_shield
                     ind += 1
-            # TODO(alan): 'check if code change needed'
+
             if self.unit_type_bits > 0:
-                type_id = self.get_unit_type_id(unit, True)
+                if side == 'red':
+                    type_id = self.get_unit_type_id(al_unit, True)
+                elif side == 'blue':
+                    type_id = self.get_unit_type_id(al_unit, False)
                 own_feats[ind + type_id] = 1
 
         agent_obs = np.concatenate(
@@ -1647,6 +1658,9 @@ class StarCraft2Env(MultiAgentEnv):
     def action_space(self):
         return [spaces.Discrete(self.n_actions) for _ in range(self.n_agents)]
 
-    def is_agent_alive(self, agent_id):
-        unit = self.get_unit_by_id(agent_id)
+    def is_agent_alive(self, agent_id, side='red'):
+        if side == 'red':
+            unit = self.get_unit_by_id(agent_id)
+        elif side == 'blue':
+            unit = self.get_unit_by_id(agent_id, blue_side=True)
         return unit.health > 0

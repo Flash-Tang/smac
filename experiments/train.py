@@ -79,7 +79,7 @@ def train(arglist):
     # TODO(alan) : Set multi-cpu to boost training
     with U.multi_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="MMM", difficulty='5')
+        env = StarCraft2Env(map_name="3m", difficulty='5')
         env_info = env.get_env_info()
 
         n_agents = env_info["n_agents"]
@@ -189,7 +189,8 @@ def train(arglist):
 
             # save model, display training output
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
-                U.save_state(arglist.save_dir, round(np.mean(episode_win[-arglist.save_rate:]), 2), saver)
+                latest_won_rate = round(np.mean(episode_win[-arglist.save_rate:]), 2)
+                U.save_state(arglist.save_dir, latest_won_rate, saver)
                 # TODO(alan): check the difference
                 # print statement depends on whether or not there are adversaries
                 # if num_adversaries == 0:
@@ -197,15 +198,16 @@ def train(arglist):
                 #         train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
                 # else:
                 print("steps: {}, episodes: {}, mean won rate: {}, mean episode reward: {}, agent episode reward: {}, mean episode killing: {}, mean_epsode remaining: {}, time: {}".format(
-                        train_step, len(episode_rewards),
-                        round(np.mean(episode_win[-arglist.save_rate:]), 2),
+                        train_step,
+                        len(episode_rewards),
+                        latest_won_rate,
                         round(np.mean(episode_rewards[-arglist.save_rate:]), 1),
                         [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in agent_rewards],
                         round(np.mean(episode_killing[-arglist.save_rate:]), 2),
                         round(np.mean(episode_remaining[-arglist.save_rate:]), 2),
                         round(time.time()-t_start, 2)))
 
-                env.save_replay(round(np.mean(episode_win[-arglist.save_rate:]), 2))
+                env.save_replay(latest_won_rate)
 
                 t_start = time.time()
                 # Keep track of final episode reward
