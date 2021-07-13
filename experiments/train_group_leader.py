@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import tensorflow as tf
 import time
-import pickle
+from gym import spaces
 
 import maddpg.common.tf_util as U
 from maddpg.trainer.maddpg import MADDPGAgentTrainer
@@ -39,6 +39,9 @@ def parse_args():
     parser.add_argument("--plots-dir", type=str, default="./learning_curves/", help="directory where plot data is saved")
     return parser.parse_args()
 
+
+POLICY_NUM = 3
+
 def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=None):
     # This model takes as input an observation and returns values of all actions
     with tf.variable_scope(scope, reuse=reuse):
@@ -48,15 +51,60 @@ def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=Non
         out = layers.fully_connected(out, num_outputs=num_outputs, activation_fn=None)
         return out
 
-def get_trainers(env, n_agents, obs_shape_n, arglist):
+
+def get_trainers(env, n_groups, obs_shape_n, arglist):
     trainers = []
     model = mlp_model
     trainer = MADDPGAgentTrainer
-    for i in range(n_agents):
+    for i in range(n_groups):
         trainers.append(trainer(
-            "agent_%d" % i, model, obs_shape_n, env.action_space(), i, arglist,
-            local_q_func=(arglist.good_policy=='ddpg')))
+            "leader_%d" % i, model, obs_shape_n, [spaces.Discrete(POLICY_NUM) for _ in range(n_groups)], i, arglist,
+        ))
     return trainers
+
+
+def p2a(policy_int_n, env):
+    n_actions = [-1] * env.n_agents
+    # Redundant
+    en_health = np.zeros((env.n_agents, ), dtype=np.float32)
+    en_id = np.zeros((env.n_agents, 3), dtype=np.float32)
+
+    for agent_id in range(env.n_agents):
+        agent_obs = env.get_enemy_obs_agent(agent_id, en_health, en_id).reshape(env.n_agents, 6)
+        if agent_id in range(2):
+            policy = policy_int_n[0]
+        elif agent_id in range(2, 9):
+            policy = policy_int_n[1]
+        else:
+            policy = policy_int_n[2]
+
+        # Distance first policy
+        if policy == 0:
+            target_en = np.argmin(agent_obs[:, 1])
+        # Health first policy
+        elif policy == 1:
+            target_en = np.argmin(agent_obs[:, 2])
+        # Type first policy
+        elif policy == 2:
+            if np.any(agent_obs[:, -1]):
+                target_en = np.nonzero(agent_obs[:, -1])[0][-1]
+            elif np.any(agent_obs[:, -2]):
+                target_en = np.nonzero(agent_obs[:, -2])[0][-1]
+            elif np.any(agent_obs[:, -3]):
+                target_en = np.nonzero(agent_obs[:, -3])[0][-1]
+            # TODO(alan): TBD
+            else:
+                target_en = 4
+
+        act = env.n_actions_no_attack + target_en
+        avail_actions = env.get_avail_agent_actions(agent_id)
+        if avail_actions[act] == 1:
+            n_actions[agent_id] = act
+        # TODO(alan): TBD
+        else:
+            n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
+
+    return n_actions
 
 
 def train(arglist):
@@ -67,13 +115,11 @@ def train(arglist):
         env_info = env.get_env_info()
 
         n_agents = env_info["n_agents"]
-        # env = make_env(arglist.scenario, arglist, arglist.benchmark)
+        n_groups = 3
 
         # Create agent trainers
-        # obs_shape_n = [env.observation_space[i].shape for i in range(env.n)]
-        obs_shape_n = [(env.get_obs_size(),) for _ in range(n_agents)]
-        # num_adversaries = min(env.n, arglist.num_adversaries)
-        trainers = get_trainers(env, n_agents, obs_shape_n, arglist)
+        obs_shape_n = [(60,) for _ in range(n_groups)]
+        trainers = get_trainers(env, n_groups, obs_shape_n, arglist)
 
         # Initialize
         U.initialize()
@@ -89,9 +135,7 @@ def train(arglist):
         episode_win = []
         episode_killing = []
         episode_remaining = []
-        agent_rewards = [[0.0] for _ in range(n_agents)]  # individual agent reward
-        final_ep_rewards = []  # sum of rewards for training curve
-        final_ep_ag_rewards = []  # agent rewards for training curve
+        group_rewards = [[0.0] for _ in range(n_groups)]  # individual agent reward
         agent_info = [[[]]]  # placeholder for benchmarking info
         saver = tf.train.Saver()
         env.reset()
@@ -101,32 +145,28 @@ def train(arglist):
 
         print('Starting iterations...')
         while True:
-            obs_n, _ = env.get_obs()
+            obs_n = env.get_obs_leader_n()
+            policy_vec_n = [leader.action(obs) for leader, obs in zip(trainers, obs_n)]
+            policy_int_n = [np.argmax(policy_vec) for policy_vec in policy_vec_n]
             # get action
-            action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
-            action_for_smac = [np.argmax(action_ar) for action_ar in action_n]
-            action_for_smac = [action if env.get_avail_agent_actions(agent)[action] else np.nonzero(env.get_avail_agent_actions(agent))[0][-1] for agent, action in enumerate(action_for_smac)]
-            action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in enumerate(action_for_smac)]
+            actions_n = p2a(policy_int_n, env)
+
             # environment step
-            # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            rew_n, terminal, info = env.step([action_for_smac])
+            rew_n, terminal, info = env.step([actions_n])
             rew_n = list(rew_n)
+            rew_n = [sum(rew_n[:2]), sum(rew_n[2:9]), sum(rew_n[9:10])]
             # TODO(alan): set individual reward
-            # rew_n = [(rew / n_agents) for _ in range(n_agents)]
-            new_obs_n, _ = env.get_obs()
-            done_n = [False for _ in range(n_agents)]
+            new_obs_n = env.get_obs_leader_n()
+            done_n = [False for _ in range(n_groups)]
             episode_step += 1
             done = all(done_n)
-            # terminal = (episode_step >= arglist.max_episode_len)
             # collect experience
-            for i, agent in enumerate(trainers):
-                agent.experience(obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
-            # obs_n = new_obs_n
+            for i, leader in enumerate(trainers):
+                leader.experience(obs_n[i], policy_vec_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
 
-            # print(f'at ep {len(episode_rewards)} rew_n len: {len(rew_n)}')
             for i, rew in enumerate(rew_n):
                 episode_rewards[-1] += rew
-                agent_rewards[i][-1] += rew
+                group_rewards[i][-1] += rew
 
             if done or terminal:
                 game_restart = not ('dead_enemies' in info.keys())
@@ -139,30 +179,12 @@ def train(arglist):
                 env.reset()
                 episode_step = 0
                 episode_rewards.append(0)
-                for a in agent_rewards:
+                for a in group_rewards:
                     a.append(0)
                 agent_info.append([[]])
 
             # increment global step counter
             train_step += 1
-
-            # for benchmarking learned policies
-            if arglist.benchmark:
-                for i, info in enumerate(info_n):
-                    agent_info[-1][i].append(info_n['n'])
-                if train_step > arglist.benchmark_iters and (done or terminal):
-                    file_name = arglist.benchmark_dir + arglist.exp_name + '.pkl'
-                    print('Finished benchmarking, now saving...')
-                    with open(file_name, 'wb') as fp:
-                        pickle.dump(agent_info[:-1], fp)
-                    break
-                continue
-
-            # for displaying learned policies
-            if arglist.display:
-                time.sleep(0.1)
-                env.render()
-                continue
 
             # update all trainers, if not in display or benchmark mode
             loss = None
@@ -175,41 +197,28 @@ def train(arglist):
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
                 latest_won_rate = round(np.mean(episode_win[-arglist.save_rate:]), 2)
                 U.save_state(arglist.save_dir, latest_won_rate, saver)
-                # TODO(alan): check the difference
-                # print statement depends on whether or not there are adversaries
-                # if num_adversaries == 0:
-                #     print("steps: {}, episodes: {}, mean episode reward: {}, time: {}".format(
-                #         train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
-                # else:
-                print("steps: {}, episodes: {}, mean won rate: {}, mean episode reward: {}, agent episode reward: {}, mean episode killing: {}, mean_epsode remaining: {}, time: {}".format(
+                print("steps: {}, episodes: {}, mean won rate: {}, mean episode reward: {}, agent episode reward: {}, "
+                      "mean episode killing: {}, mean_epsode remaining: {}, time: {}"
+                      .format(
                         train_step,
                         len(episode_rewards),
                         latest_won_rate,
                         round(np.mean(episode_rewards[-arglist.save_rate:]), 1),
-                        [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in agent_rewards],
+                        [round(np.mean(rew[-arglist.save_rate:]), 1) for rew in group_rewards],
                         round(np.mean(episode_killing[-arglist.save_rate:]), 2),
                         round(np.mean(episode_remaining[-arglist.save_rate:]), 2),
-                        round(time.time()-t_start, 2)))
+                        round(time.time()-t_start, 2)
+                            )
+                    )
 
                 env.save_replay(latest_won_rate)
 
                 t_start = time.time()
-                # Keep track of final episode reward
-                final_ep_rewards.append(np.mean(episode_rewards[-arglist.save_rate:]))
-                for rew in agent_rewards:
-                    final_ep_ag_rewards.append(np.mean(rew[-arglist.save_rate:]))
 
-            # saves final episode reward for plotting training curve later
             if len(episode_rewards) > arglist.num_episodes:
-                rew_file_name = arglist.plots_dir + arglist.exp_name + '_rewards.pkl'
-                with open(rew_file_name, 'wb') as fp:
-                    pickle.dump(final_ep_rewards, fp)
-                agrew_file_name = arglist.plots_dir + arglist.exp_name + '_agrewards.pkl'
-                with open(agrew_file_name, 'wb') as fp:
-                    pickle.dump(final_ep_ag_rewards, fp)
-                print('...Finished total of {} episodes.'.format(len(episode_rewards)))
                 break
     env.close()
+
 
 if __name__ == '__main__':
     arglist = parse_args()

@@ -10,6 +10,7 @@ def main():
     n_agents = env_info["n_agents"]
 
     n_episodes = 100
+    win_cnt = 0
 
     with U.single_threaded_session():
 
@@ -17,7 +18,7 @@ def main():
         blue_actors = get_actors(env, n_agents)
 
         U.initialize()
-        U.load_state('/tmp/policy/')
+        U.load_state('./policy/agents_policy/0.31')
         for e in range(n_episodes):
             env.reset()
             terminal = False
@@ -29,9 +30,16 @@ def main():
                 blue_act = get_actions(blue_actors, blue_obs, env, 'blue')
 
                 # environment step
-                _, terminal, _ = env.step([red_act, blue_act])
+                _, terminal, info = env.step([red_act, blue_act])
+
+            if info['battle_won']:
+                print(f'win game {e}')
+                win_cnt += 1
+            else:
+                print(f'lose game {e}')
 
     env.close()
+    print('win rate {.2f}'.format(win_cnt / n_episodes))
 
 
 if __name__ == "__main__":
