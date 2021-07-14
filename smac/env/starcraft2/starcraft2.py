@@ -1134,14 +1134,17 @@ class StarCraft2Env(MultiAgentEnv):
             blue_side_obs = [self.get_obs_agent(i, side='blue') for i in range(self.n_agents)]
             return [red_side_obs, blue_side_obs]
 
-    def get_enemy_obs_agent(self, agent_id, en_health, en_type_id):
-        unit = self.get_unit_by_id(agent_id)
+    def get_enemy_obs_agent(self, agent_id, en_health, en_type_id, side='red'):
+        if side == 'red':
+            unit = self.get_unit_by_id(agent_id)
+        elif side == 'blue':
+            unit = self.get_unit_by_id(agent_id, blue_side=True)
 
         enemy_feats_dim = (self.n_agents, 6)
 
         enemy_feats = np.zeros(enemy_feats_dim, dtype=np.float32)
 
-        avail_actions = self.get_avail_agent_actions(agent_id)
+        avail_actions = self.get_avail_agent_actions(agent_id, side='blue')
 
         if unit.health > 0:  # otherwise dead, return all zeros
             x = unit.pos.x
@@ -1186,7 +1189,56 @@ class StarCraft2Env(MultiAgentEnv):
 
         return enemy_feats
 
-    def get_obs_leader_n(self):
+    def get_medi_obs(self, side):
+        if side == 'red':
+            medivac_unit = self.get_unit_by_id(9)
+        elif side == 'blue':
+            medivac_unit = self.get_unit_by_id(9, blue_side=True)
+
+        x = medivac_unit.pos.x
+        y = medivac_unit.pos.y
+        sight_range = self.unit_sight_range(medivac_unit)
+
+        al_ids = list(range(9))
+        for i, al_id in enumerate(al_ids):
+            al_unit = self.get_unit_by_id(al_id)
+            al_x = al_unit.pos.x
+            al_y = al_unit.pos.y
+            dist = self.distance(x, y, al_x, al_y)
+
+            ally_feats_dim = self.get_obs_ally_feats_size()
+            ally_feats = np.zeros(ally_feats_dim, dtype=np.float32)
+
+            if (
+                    dist < sight_range and al_unit.health > 0
+            ):  # visible and alive
+                ally_feats[i, 0] = 1  # visible
+                ally_feats[i, 1] = dist / sight_range  # distance
+                ally_feats[i, 2] = (al_x - x) / sight_range  # relative X
+                ally_feats[i, 3] = (al_y - y) / sight_range  # relative Y
+
+                ind = 4
+                if self.obs_all_health:
+                    ally_feats[i, ind] = (
+                            al_unit.health / al_unit.health_max
+                    )  # health
+                    ind += 1
+                    if self.shield_bits_ally > 0:
+                        max_shield = self.unit_max_shield(al_unit)
+                        ally_feats[i, ind] = (
+                                al_unit.shield / max_shield
+                        )  # shield
+                        ind += 1
+
+                if self.unit_type_bits > 0:
+                    # Check why unit_type of both sides are different
+                    type_id = self.get_unit_type_id(al_unit, True)
+                    ally_feats[i, ind + type_id] = 1
+                    ind += self.unit_type_bits
+
+        return ally_feats
+
+    def get_obs_leader_n(self, side):
         # agents' order: 2 * Marauders + 7 * Marines + 1 * Medivac
         # available, distance, r_health, type_bits=3
         feats_dim = 6
@@ -1200,7 +1252,7 @@ class StarCraft2Env(MultiAgentEnv):
         en_health = np.zeros((self.n_agents,), dtype=np.float32)
         en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
         for agent_id in range(2):
-            combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id)
+            combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id, side)
         Maras_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
         Maras_obs[:, 2] = en_health
         Maras_obs[:, -3:] = en_type_id
@@ -1216,14 +1268,16 @@ class StarCraft2Env(MultiAgentEnv):
         Marines_obs[:, -3:] = en_type_id
 
         # Medivac group
-        combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-        en_health = np.zeros((self.n_agents,), dtype=np.float32)
-        en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
-        for agent_id in range(9, 10):
-            combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id)
-        Medivac_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
-        Medivac_obs[:, 2] = en_health
-        Medivac_obs[:, -3:] = en_type_id
+        # combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
+        # en_health = np.zeros((self.n_agents,), dtype=np.float32)
+        # en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
+        # for agent_id in range(9, 10):
+        #     combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id)
+        # Medivac_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
+        # Medivac_obs[:, 2] = en_health
+        # Medivac_obs[:, -3:] = en_type_id
+        Medivac_obs = self.get_medi_obs(side)
+
 
         return [Maras_obs.flatten(), Marines_obs.flatten(), Medivac_obs.flatten()]
 

@@ -64,14 +64,18 @@ def get_trainers(env, n_groups, obs_shape_n, arglist):
     return trainers
 
 
-def p2a(policy_int_n, env):
+def p2a(policy_int_n, env, side='red'):
     n_actions = [-1] * env.n_agents
+    target_en = -1
     # Redundant
     en_health = np.zeros((env.n_agents, ), dtype=np.float32)
     en_id = np.zeros((env.n_agents, 3), dtype=np.float32)
 
     for agent_id in range(env.n_agents):
-        agent_obs = env.get_enemy_obs_agent(agent_id, en_health, en_id).reshape(env.n_agents, 6)
+        if agent_id != 9:
+            agent_obs = env.get_enemy_obs_agent(agent_id, en_health, en_id, side=side).reshape(env.n_agents, 6)
+        else:
+            agent_obs = env.get_medi_obs(side=side)
         if agent_id in range(2):
             policy = policy_int_n[0]
         elif agent_id in range(2, 9):
@@ -81,29 +85,56 @@ def p2a(policy_int_n, env):
 
         # Distance first policy
         if policy == 0:
-            target_en = np.argmin(agent_obs[:, 1])
+            distance_col = agent_obs[:, 1]
+            non_zero_index = np.nonzero(distance_col)[0]
+            # None is visible
+            if not non_zero_index.size:
+                # Move east
+                move_act = 5
+            else:
+                index2value = dict(zip(non_zero_index, distance_col[non_zero_index]))
+                target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
+
         # Health first policy
         elif policy == 1:
-            target_en = np.argmin(agent_obs[:, 2])
+            if agent_id != 9:
+                health_col = agent_obs[:, 2]
+            else:
+                health_col = agent_obs[:, 4]
+            non_zero_index = np.nonzero(health_col)[0]
+            # None is visible
+            if not non_zero_index.size:
+                # Move east
+                move_act = 5
+            else:
+                index2value = dict(zip(non_zero_index, health_col[non_zero_index]))
+                target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
+
         # Type first policy
         elif policy == 2:
-            if np.any(agent_obs[:, -1]):
-                target_en = np.nonzero(agent_obs[:, -1])[0][-1]
+            # TODO(alan): Medivac is very important, when attack enemy, medivac should be target at first
+            if np.any(agent_obs[:, -3]):
+                target_en = np.nonzero(agent_obs[:, -3])[0][-1]
             elif np.any(agent_obs[:, -2]):
                 target_en = np.nonzero(agent_obs[:, -2])[0][-1]
-            elif np.any(agent_obs[:, -3]):
-                target_en = np.nonzero(agent_obs[:, -3])[0][-1]
-            # TODO(alan): TBD
+            elif np.any(agent_obs[:, -1]):
+                target_en = np.nonzero(agent_obs[:, -1])[0][-1]
             else:
-                target_en = 4
+                move_act = 5
 
-        act = env.n_actions_no_attack + target_en
-        avail_actions = env.get_avail_agent_actions(agent_id)
-        if avail_actions[act] == 1:
-            n_actions[agent_id] = act
+        avail_actions = env.get_avail_agent_actions(agent_id, side=side)
+        if target_en != -1:
+            act = env.n_actions_no_attack + target_en
+            if avail_actions[act] == 1:
+                n_actions[agent_id] = act
+            else:
+                n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
         # TODO(alan): TBD
         else:
-            n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
+            if avail_actions[move_act] == 1:
+                n_actions[agent_id] = move_act
+            else:
+                n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
 
     return n_actions
 
@@ -119,7 +150,7 @@ def train(arglist):
         n_groups = 3
 
         # Create agent trainers
-        obs_shape_n = [(60,) for _ in range(n_groups)]
+        obs_shape_n = [(60,), (60, ), (72, )]
         trainers = get_trainers(env, n_groups, obs_shape_n, arglist)
 
         # Initialize
