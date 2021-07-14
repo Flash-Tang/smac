@@ -383,9 +383,9 @@ class StarCraft2Env(MultiAgentEnv):
             # Launch StarCraft II
             self._launch()
         else:
-            self._launch()
+            # self._launch()
             # TODO(alan): to be fixed
-            # self._restart()
+            self._restart()
 
         # Information kept for counting the reward
         self.death_tracker_ally = np.zeros(self.n_agents)
@@ -1189,7 +1189,7 @@ class StarCraft2Env(MultiAgentEnv):
 
         return enemy_feats
 
-    def get_medi_obs(self, side):
+    def get_medi_obs(self, side='red'):
         if side == 'red':
             medivac_unit = self.get_unit_by_id(9)
         elif side == 'blue':
@@ -1238,7 +1238,7 @@ class StarCraft2Env(MultiAgentEnv):
 
         return ally_feats
 
-    def get_obs_leader_n(self, side):
+    def get_obs_leader_n(self, side='red'):
         # agents' order: 2 * Marauders + 7 * Marines + 1 * Medivac
         # available, distance, r_health, type_bits=3
         feats_dim = 6

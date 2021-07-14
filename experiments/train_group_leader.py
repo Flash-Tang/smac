@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument("--num-units", type=int, default=64, help="number of units in the mlp")
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='maddpg_in_smac', help="name of the experiment")
-    parser.add_argument("--save-dir", type=str, default="/tmp/policy/", help="directory in which training state and model should be saved")
+    parser.add_argument("--save-dir", type=str, default="/tmp/leader_policy/", help="directory in which training state and model should be saved")
     parser.add_argument("--save-rate", type=int, default=100, help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="", help="directory in which training state and model are loaded")
     # Evaluation
@@ -90,7 +90,7 @@ def p2a(policy_int_n, env, side='red'):
             # None is visible
             if not non_zero_index.size:
                 # Move east
-                move_act = 5
+                move_act = 4
             else:
                 index2value = dict(zip(non_zero_index, distance_col[non_zero_index]))
                 target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
@@ -105,7 +105,7 @@ def p2a(policy_int_n, env, side='red'):
             # None is visible
             if not non_zero_index.size:
                 # Move east
-                move_act = 5
+                move_act = 4
             else:
                 index2value = dict(zip(non_zero_index, health_col[non_zero_index]))
                 target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
@@ -120,7 +120,7 @@ def p2a(policy_int_n, env, side='red'):
             elif np.any(agent_obs[:, -1]):
                 target_en = np.nonzero(agent_obs[:, -1])[0][-1]
             else:
-                move_act = 5
+                move_act = 4
 
         avail_actions = env.get_avail_agent_actions(agent_id, side=side)
         if target_en != -1:
