@@ -42,6 +42,7 @@ def parse_args():
 
 POLICY_NUM = 3
 
+
 def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=None):
     # This model takes as input an observation and returns values of all actions
     with tf.variable_scope(scope, reuse=reuse):

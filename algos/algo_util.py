@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import numpy as np
+from gym import spaces
 
 from maddpg.trainer.maddpg import MADDPGAgentActor
 import tensorflow.contrib.layers as layers
@@ -24,6 +25,16 @@ def get_actors(env, n_agents):
     for i in range(n_agents):
         actors.append(actor(
             "agent_%d" % i, model, obs_shape_n, env.action_space(), i))
+    return actors
+
+def get_leader_actors(env, n_groups):
+    actors = []
+    model = mlp_model
+    actor = MADDPGAgentActor
+    obs_shape_n = [(60,) for _ in range(n_groups)]
+    for i in range(n_groups):
+        actors.append(actor(
+            "leader_%d" % i, model, obs_shape_n, [spaces.Discrete(3) for _ in range(n_groups)], i))
     return actors
 
 def get_actions(actors, obs, env, side):
