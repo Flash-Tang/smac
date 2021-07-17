@@ -1239,47 +1239,53 @@ class StarCraft2Env(MultiAgentEnv):
         return ally_feats
 
     def get_obs_leader_n(self, side='red'):
-        # agents' order: 2 * Marauders + 7 * Marines + 1 * Medivac
-        # available, distance, r_health, type_bits=3
-        feats_dim = 6
-
-        Maras_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-        Marines_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-        Medivac_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-
-        # Marauders group
-        combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-        en_health = np.zeros((self.n_agents,), dtype=np.float32)
-        en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
-        for agent_id in range(2):
-            combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id, side)
-        Maras_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
-        Maras_obs[:, 2] = en_health
-        Maras_obs[:, -3:] = en_type_id
-
-        # Marines group
-        combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
-        en_health = np.zeros((self.n_agents,), dtype=np.float32)
-        en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
-        for agent_id in range(2, 9):
-            combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id)
-        Marines_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
-        Marines_obs[:, 2] = en_health
-        Marines_obs[:, -3:] = en_type_id
-
-        # Medivac group
+        # # agents' order: 2 * Marauders + 7 * Marines + 1 * Medivac
+        # # available, distance, r_health, type_bits=3
+        # feats_dim = 6
+        #
+        # Maras_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
+        # Marines_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
+        # Medivac_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
+        #
+        # # Marauders group
         # combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
         # en_health = np.zeros((self.n_agents,), dtype=np.float32)
         # en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
-        # for agent_id in range(9, 10):
+        # for agent_id in range(2):
+        #     combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id, side)
+        # Maras_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
+        # Maras_obs[:, 2] = en_health
+        # Maras_obs[:, -3:] = en_type_id
+        #
+        # # Marines group
+        # combined_obs = np.zeros((self.n_agents, feats_dim), dtype=np.float32)
+        # en_health = np.zeros((self.n_agents,), dtype=np.float32)
+        # en_type_id = np.zeros((self.n_agents, self.unit_type_bits), dtype=np.float32)
+        # for agent_id in range(2, 9):
         #     combined_obs += self.get_enemy_obs_agent(agent_id, en_health, en_type_id)
-        # Medivac_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
-        # Medivac_obs[:, 2] = en_health
-        # Medivac_obs[:, -3:] = en_type_id
-        Medivac_obs = self.get_medi_obs(side)
+        # Marines_obs[:, :2] = np.mean(combined_obs[:, :2], axis=0)
+        # Marines_obs[:, 2] = en_health
+        # Marines_obs[:, -3:] = en_type_id
+        #
+        # # Medivac group
+        # Medivac_obs = self.get_medi_obs(side)
+        #
+        #
+        # return [Maras_obs.flatten(), Marines_obs.flatten(), Medivac_obs.flatten()]
 
+        Maras_obs = []
+        for agent_id in range(2):
+            Maras_obs.append(self.get_obs_agent(agent_id))
+        Maras_obs = np.concatenate(Maras_obs)
 
-        return [Maras_obs.flatten(), Marines_obs.flatten(), Medivac_obs.flatten()]
+        Marins_obs = []
+        for agent_id in range(2, 9):
+            Marins_obs.append(self.get_obs_agent(agent_id))
+        Marins_obs = np.concatenate(Marins_obs)
+
+        Medi_obs = self.get_obs_agent(9)
+
+        return [Maras_obs, Marins_obs, Medi_obs]
 
     def get_state(self):
         """Returns the global state.

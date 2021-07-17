@@ -90,7 +90,19 @@ def p2a(policy_int_n, env, side='red'):
             # None is visible
             if not non_zero_index.size:
                 # Move east
-                move_act = 4
+                if agent_id != 9:
+                    move_act = 4
+                else:
+                    pos_col = agent_obs[:, 2]
+                    right_formation = True
+                    for r_x in pos_col:
+                        if r_x <= 0:
+                            right_formation = False
+                            break
+                    if right_formation:
+                        move_act = 4
+                    else:
+                        move_act = 5
             else:
                 index2value = dict(zip(non_zero_index, distance_col[non_zero_index]))
                 target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
@@ -105,7 +117,19 @@ def p2a(policy_int_n, env, side='red'):
             # None is visible
             if not non_zero_index.size:
                 # Move east
-                move_act = 4
+                if agent_id != 9:
+                    move_act = 4
+                else:
+                    pos_col = agent_obs[:, 2]
+                    right_formation = True
+                    for r_x in pos_col:
+                        if r_x <= 0:
+                            right_formation = False
+                            break
+                    if right_formation:
+                        move_act = 4
+                    else:
+                        move_act = 5
             else:
                 index2value = dict(zip(non_zero_index, health_col[non_zero_index]))
                 target_en = sorted(index2value.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
@@ -120,7 +144,19 @@ def p2a(policy_int_n, env, side='red'):
             elif np.any(agent_obs[:, -1]):
                 target_en = np.nonzero(agent_obs[:, -1])[0][-1]
             else:
-                move_act = 4
+                if agent_id != 9:
+                    move_act = 4
+                else:
+                    pos_col = agent_obs[:, 2]
+                    right_formation = True
+                    for r_x in pos_col:
+                        if r_x <= 0:
+                            right_formation = False
+                            break
+                    if right_formation:
+                        move_act = 4
+                    else:
+                        move_act = 5
 
         avail_actions = env.get_avail_agent_actions(agent_id, side=side)
         if target_en != -1:
@@ -150,7 +186,9 @@ def train(arglist):
         n_groups = 3
 
         # Create agent trainers
-        obs_shape_n = [(60,), (60, ), (72, )]
+        # obs_shape_n = [(60,), (60, ), (72, )]
+        single_agent_obs_dim = env.get_obs_size()
+        obs_shape_n = [(single_agent_obs_dim * 2, ), (single_agent_obs_dim * 7, ), (single_agent_obs_dim, )]
         trainers = get_trainers(env, n_groups, obs_shape_n, arglist)
 
         # Initialize
