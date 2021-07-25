@@ -31,7 +31,7 @@ def get_leader_actors(env, n_groups):
     actors = []
     model = mlp_model
     actor = MADDPGAgentActor
-    obs_shape_n = [(60,), (60,), (72, )]
+    obs_shape_n = [(env.get_obs_size() * 2, ), (env.get_obs_size() * 7, ), (env.get_obs_size(), )]
     for i in range(n_groups):
         actors.append(actor(
             "leader_%d" % i, model, obs_shape_n, [spaces.Discrete(3) for _ in range(n_groups)], i))

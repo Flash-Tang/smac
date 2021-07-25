@@ -333,7 +333,7 @@ class StarCraft2Env(MultiAgentEnv):
         for j in range(self.policy_agents_num):
             join = sc_pb.RequestJoinGame(options=interface_options)
             join.race = races[self._agent_race]
-            join.player_name = f'player{j}'
+            join.player_name = 'player{}'.format(j)
             if self._ports:
                 join.shared_port = 0  # unused
                 join.server_ports.game_port = self._ports[0]
@@ -1199,6 +1199,8 @@ class StarCraft2Env(MultiAgentEnv):
         y = medivac_unit.pos.y
         sight_range = self.unit_sight_range(medivac_unit)
 
+        ally_feats_dim = self.get_obs_ally_feats_size()
+        ally_feats = np.zeros(ally_feats_dim, dtype=np.float32)
         al_ids = list(range(9))
         for i, al_id in enumerate(al_ids):
             al_unit = self.get_unit_by_id(al_id)
@@ -1206,8 +1208,6 @@ class StarCraft2Env(MultiAgentEnv):
             al_y = al_unit.pos.y
             dist = self.distance(x, y, al_x, al_y)
 
-            ally_feats_dim = self.get_obs_ally_feats_size()
-            ally_feats = np.zeros(ally_feats_dim, dtype=np.float32)
 
             if (
                     dist < sight_range and al_unit.health > 0
@@ -1658,12 +1658,38 @@ class StarCraft2Env(MultiAgentEnv):
                             self.agents[i].pos.y,
                         )
                     )
-            # TODO(alan): Is sorting enemies unit necessary
-            for unit in self._obs.observation.raw_data.units:
-                if unit.owner == 2:
-                    self.enemies[len(self.enemies)] = unit
-                    if self._episode_count == 0:
-                        self.max_reward += unit.health_max + unit.shield_max
+            # TODO(alan): Both sides' formation are not symmetric, consider does the trained agent matches the blue unit
+            enemy_units = [
+                unit
+                for unit in self._obs.observation.raw_data.units
+                if unit.owner == 2
+            ]
+            # 7 2 1, not the formation as the red side
+            # enemy_units_sorted = sorted(
+            #     enemy_units,
+            #     key=attrgetter("unit_type", "pos.x", "pos.y"),
+            #     reverse=False,
+            # )
+            Maras, Marins, Medivac = [], [], []
+            for unit in enemy_units:
+                if unit.unit_type == 51:
+                    Maras.append(unit)
+                elif unit.unit_type == 48:
+                    Marins.append(unit)
+                elif unit.unit_type == 54:
+                    Medivac.append(unit)
+            enemy_units_grouped = Maras + Marins + Medivac
+
+            for i in range(len(enemy_units_grouped)):
+                self.enemies[i] = enemy_units_grouped[i]
+                if self._episode_count == 0:
+                    self.max_reward += enemy_units_grouped[i].health_max + enemy_units_grouped[i].shield_max
+
+            # for unit in self._obs.observation.raw_data.units:
+            #     if unit.owner == 2:
+            #         self.enemies[len(self.enemies)] = unit
+            #         if self._episode_count == 0:
+            #             self.max_reward += unit.health_max + unit.shield_max
 
             self.red_agents = self.agents
             self.blue_agents = self.enemies

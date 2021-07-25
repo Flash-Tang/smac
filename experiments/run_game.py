@@ -32,16 +32,16 @@ def get_actors(env, n_agents, obs_shape_n):
 
 def main():
     with U.single_threaded_session():
-        env = StarCraft2Env(map_name="MMM", policy_agents_num=2)
+        env = StarCraft2Env(map_name="MMM")
         env_info = env.get_env_info()
         n_agents = env_info['n_agents']
         obs_shape_n = [(env.get_obs_size(),) for _ in range(n_agents)]
         actors_both_sides = []
-        for _ in range(2):
+        for _ in range(1):
             actors_both_sides.append(get_actors(env, n_agents, obs_shape_n))
 
         U.initialize()
-        U.load_state('/tmp/policy/')
+        U.load_state('./policy/agents_policy/0.31')
 
         episode_rewards = [0.0]  # sum of rewards for all agents
         episode_win = []
@@ -52,7 +52,7 @@ def main():
         env.reset()
         episode_step = 0
         train_step = 0
-        save_rate = 200
+        save_rate = 100
         t_start = time.time()
 
         print('Starting interaction...')
@@ -67,7 +67,7 @@ def main():
             action_for_smac = [action if env.is_agent_alive(agent) else 0 for agent, action in
                                enumerate(action_for_smac)]
             # environment step
-            rew_n, terminal, info = env.step(action_for_smac)
+            rew_n, terminal, info = env.step([action_for_smac])
             rew_n = list(rew_n)
             done_n = [False for _ in range(n_agents)]
             episode_step += 1

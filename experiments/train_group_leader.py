@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import time
 from gym import spaces
+import random
 
 import maddpg.common.tf_util as U
 from maddpg.trainer.maddpg import MADDPGAgentTrainer
@@ -164,7 +165,15 @@ def p2a(policy_int_n, env, side='red'):
             if avail_actions[act] == 1:
                 n_actions[agent_id] = act
             else:
-                n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
+                last_avai_act = np.nonzero(avail_actions)[0][-1]
+                if last_avai_act >= env.n_actions_no_attack:
+                    n_actions[agent_id] = np.nonzero(avail_actions)[0][-1]
+                else:
+                    # n_actions[agent_id] = random.choice(np.nonzero(avail_actions)[0])
+                    if avail_actions[4]:
+                        n_actions[agent_id] = 4
+                    else:
+                        n_actions[agent_id] = random.choice(np.nonzero(avail_actions)[0])
         # TODO(alan): TBD
         else:
             if avail_actions[move_act] == 1:
@@ -177,7 +186,7 @@ def p2a(policy_int_n, env, side='red'):
 
 def train(arglist):
     # TODO(alan) : Set multi-cpu to boost training
-    with U.multi_threaded_session():
+    with U.single_threaded_session():
         # Create environment
         env = StarCraft2Env(map_name="MMM", difficulty='5')
         env_info = env.get_env_info()
@@ -266,7 +275,7 @@ def train(arglist):
             # save model, display training output
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
                 latest_won_rate = round(np.mean(episode_win[-arglist.save_rate:]), 2)
-                U.save_state(arglist.save_dir, latest_won_rate, saver)
+                U.save_state(arglist.save_dir, saver)
                 print("steps: {}, episodes: {}, mean won rate: {}, mean episode reward: {}, agent episode reward: {}, "
                       "mean episode killing: {}, mean_epsode remaining: {}, time: {}"
                       .format(
