@@ -35,7 +35,7 @@ def main():
             blue_actors = get_actors(env, n_agents)
 
             U.initialize()
-            U.load_state('./policy/agents_policy/0.31')
+            U.load_state('./policy/agents_policy/')
 
     for e in range(n_episodes):
         env.reset()
@@ -50,7 +50,7 @@ def main():
                     red_act = get_actions(red_actors, red_obs, env, 'red')
                     blue_act = get_actions(blue_actors, blue_obs, env, 'blue')
 
-            if ep_step % 2 == 0:
+            if ep_step % 5 == 0:
                 with leaders_sess.as_default():
                     with g1.as_default():
                         obs_n = env.get_obs_leader_n(side='red')
