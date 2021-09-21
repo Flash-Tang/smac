@@ -18,13 +18,15 @@
 
    + [ ] 下载本git仓库
 
-     https://github.com/Flash-Tang/smac.git
+     ```shell
+     git clone https://github.com/Flash-Tang/smac.git
+     ```
 
-   + [ ] 下载自定义地图
+   + [ ] 下载自定义地图并存放至星际争霸游戏安装目录 /StarCraftII/Maps/SMAC_Maps
 
      [地图链接](https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip)
 
-   + [ ] 下载星际争霸地图编辑器
+   + [ ] 下载星际争霸地图编辑器编辑刚下载的地图
 
 2. **算法**
 
@@ -46,13 +48,13 @@
 
 + smac/smac/experiments/train_goup_leader.py
 
-  以上两个命令分别在experiments/policy文件夹下生成模型文件
+  > 以上两个命令分别在experiments/policy文件夹下生成模型文件
 
 **Mininet网络仿真**
 
 + smac/smac/experiments/com_with_mn.py
 
-**对抗**
+**模型对比**
 
 + smac/smac/experiments/battle.py
 
@@ -76,5 +78,3 @@
      cd maddpg
      pip install -e .
      ```
-
-2. 
