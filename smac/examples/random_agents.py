@@ -2,13 +2,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from smac.env import StarCraft2Env
+import sys
+sys.path.append('/home/alantang/PycharmProjects/MaRL_Env')
+
+from smac.env.starcraft2.starcraft2 import StarCraft2Env
 import numpy as np
 
 
 def main():
-    env = StarCraft2Env(map_name="8m", debug=True)
+    env = StarCraft2Env(map_name="3m", debug=True)
     env_info = env.get_env_info()
+
+    env.reset()
+
+    for a_id in range(10):
+        unit = env.get_unit_by_id(a_id)
 
     n_actions = env_info["n_actions"]
     n_agents = env_info["n_agents"]

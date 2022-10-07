@@ -47,7 +47,7 @@ while True:
     message += data
     with open(f'shared_buffer/message_received/msg_from_agent_{args.receiver_index}', 'w') as f:
         f.write('%s' % np.fromstring(message, dtype=np.float32))
-    break
+    # break
 
 print('receive ok.')
 

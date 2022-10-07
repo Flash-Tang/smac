@@ -9,6 +9,15 @@ from maddpg.trainer.maddpg import MADDPGAgentTrainer
 import tensorflow.contrib.layers as layers
 
 from smac.env import StarCraft2Env
+import matplotlib.pyplot as plt
+
+
+def draw_won_rate(won_rate):
+    plt.xlabel('episodes')
+    plt.ylabel('win rate')
+    plt.plot([100 * i for i in range(1, len(won_rate) + 1)], won_rate)
+
+    plt.show()
 
 
 def parse_args():
@@ -27,7 +36,7 @@ def parse_args():
     parser.add_argument("--num-units", type=int, default=64, help="number of units in the mlp")
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='maddpg_in_smac', help="name of the experiment")
-    parser.add_argument("--save-dir", type=str, default="/tmp/policy/", help="directory in which training state and model should be saved")
+    parser.add_argument("--save-dir", type=str, default="/home/alantang/agents_policy/", help="directory in which training state and model should be saved")
     parser.add_argument("--save-rate", type=int, default=100, help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="", help="directory in which training state and model are loaded")
     # Evaluation
@@ -63,7 +72,7 @@ def train(arglist):
     # TODO(alan) : Set multi-cpu to boost training
     with U.multi_threaded_session():
         # Create environment
-        env = StarCraft2Env(map_name="MMM", difficulty='5')
+        env = StarCraft2Env(map_name="MMM_redirect_train", difficulty='5')
         env_info = env.get_env_info()
 
         n_agents = env_info["n_agents"]
@@ -99,6 +108,9 @@ def train(arglist):
         train_step = 0
         t_start = time.time()
 
+        won_rate = []
+        buffer_len = 0
+
         print('Starting iterations...')
         while True:
             obs_n, _ = env.get_obs()
@@ -121,6 +133,7 @@ def train(arglist):
             # collect experience
             for i, agent in enumerate(trainers):
                 agent.experience(obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
+                buffer_len += 1
             # obs_n = new_obs_n
 
             # print(f'at ep {len(episode_rewards)} rew_n len: {len(rew_n)}')
@@ -174,6 +187,7 @@ def train(arglist):
             # save model, display training output
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
                 latest_won_rate = round(np.mean(episode_win[-arglist.save_rate:]), 2)
+                won_rate.append(latest_won_rate)
                 U.save_state(arglist.save_dir, latest_won_rate, saver)
                 # TODO(alan): check the difference
                 # print statement depends on whether or not there are adversaries
@@ -191,6 +205,7 @@ def train(arglist):
                         round(np.mean(episode_killing[-arglist.save_rate:]), 2),
                         round(np.mean(episode_remaining[-arglist.save_rate:]), 2),
                         round(time.time()-t_start, 2)))
+                print(f'buffer len: {buffer_len}')
 
                 env.save_replay(latest_won_rate)
 
@@ -210,7 +225,11 @@ def train(arglist):
                     pickle.dump(final_ep_ag_rewards, fp)
                 print('...Finished total of {} episodes.'.format(len(episode_rewards)))
                 break
+
+            if len(episode_rewards) == 50000: break
     env.close()
+    draw_won_rate(won_rate)
+
 
 if __name__ == '__main__':
     arglist = parse_args()

@@ -1,9 +1,14 @@
+import mininet.link
+
 from smac.env import StarCraft2Env
 import numpy as np
+import os
+from os import path
 import time
 import logging
 from threading import Thread
 import argparse
+import matplotlib
 import matplotlib.pyplot as plt
 
 from mininet.topo import Topo
@@ -33,16 +38,38 @@ def agent2group(agent_id):
     else: return 2
 
 
-def draw_plot(trans_times):
-    plt.xlabel('step')
-    plt.ylabel('transmission time')
-    if 'grouped' == args.topo:
-        plt.scatter([5 * i for i in range(20)], trans_times, marker='+', color=['red'] * 20,
-                    label='controlled by leader')
-        plt.scatter([i for i in range(100) if i % 5 != 0], [0] * 80, label='self control')
-        plt.legend(loc='upper right')
-    else:
-        plt.plot(list(range(100)), trans_times, linewidth=5)
+def net_flow_cnt(message_dir='shared_buffer/message_to_sent'):
+    size = 0
+    for root, dirs, files in os.walk(message_dir):
+        size += sum([path.getsize(path.join(root, name)) for name in files])
+    return size / 1024
+
+
+def draw_plot(centered_trans_times, hybrid_trans_times, centered_net_flow, hybrid_net_flow):
+    # matplotlib.rcParams['font.sans-serif'] = ['Droid Sans Fallback']
+
+    # ax = plt.subplot(2, 2, 1)
+    plt.title('中心化模型传输时延', fontproperties='Droid Sans Fallback')
+    plt.xlabel('游戏内步数', fontproperties='Droid Sans Fallback')
+    plt.ylabel('传输时延（秒）', fontproperties='Droid Sans Fallback')
+    plt.plot(list(range(100)), centered_trans_times, linewidth=5)
+    plt.show()
+
+    # ax = plt.subplot(2, 2, 2)
+    plt.title('分层模型传输时延',  fontproperties='Droid Sans Fallback')
+    plt.xlabel('游戏内步数', fontproperties='Droid Sans Fallback')
+    plt.ylabel('传输时延（秒）', fontproperties='Droid Sans Fallback')
+    plt.scatter([5 * i for i in range(20)], hybrid_trans_times, marker='+', color=['red'] * 20,
+                label='control by leader')
+    plt.scatter([i for i in range(100) if i % 5 != 0], [0] * 80, label='self control')
+    plt.legend(loc='upper right')
+    plt.show()
+
+    # ax = plt.subplot(2, 2, 3)
+    plt.title('两种模型网络流量对比', fontproperties='Droid Sans Fallback')
+    plt.xlabel('模型', fontproperties='Droid Sans Fallback')
+    plt.ylabel('网络流量', fontproperties='Droid Sans Fallback')
+    plt.bar(['central model', 'multi-layer model'], [centered_net_flow, hybrid_net_flow], color=['red', 'green'], width=0.3)
 
     plt.show()
 
@@ -66,7 +93,7 @@ class CenteredMultiLinkTopo(Topo):
 
         # Central host
         c_host[0] = self.addHost('c0')
-        self.addLink('c0', 's0', delay='20ms')
+        self.addLink('c0', 's0', bw=args.bandwidth, delay='20ms')
 
     def receiver_set_up(self, net):
         for agent_id in range(n_agents):
@@ -96,10 +123,6 @@ class GroupedMultiLinkTopo(Topo):
     """
     def __init__(self):
         Topo.__init__(self)
-        # self.receive_pros = []
-        # self.a_host = [''] * n_agents
-        # self.l_host = [''] * n_groups
-        # self.m_switches = [''] * n_groups
         self.leader_hosts = []
         self.receive_pros = []
         self.group_start_stop_idxes = [(0, 2), (2, 9), (9, 10)]
@@ -157,48 +180,72 @@ class GroupedMultiLinkTopo(Topo):
 
 
 def main():
-    if args.topo == 'grouped':
-        topo = GroupedMultiLinkTopo()
-    elif args.topo == 'centered':
-        topo = CenteredMultiLinkTopo()
-    net = Mininet(topo=topo)
+    # Centered Topo
+    topo = CenteredMultiLinkTopo()
+    net = Mininet(topo=topo, link=mininet.link.TCLink)
     net.start()
-
+    CLI(net)
     topo.receiver_set_up(net)
-    # CLI(net)
+
 
     n_episode = 1
-    n_step = 100
+    n_step = 201
 
     for e in range(n_episode):
         env.reset()
-        trans_times = []
+        centered_trans_times, hybrid_trans_times = [], []
+        centered_net_flow, hybrid_net_flow = 0, 0
 
         for step in range(n_step):
-            obs = env.get_obs()
+            obs, _ = env.get_obs()
 
             # Agent saves obs of their own
             for agent_id, agent_obs in enumerate(obs):
                 logging.info(f'agent{agent_id}\'s obs shape: {agent_obs.shape}')
                 np.save(f'shared_buffer/message_to_sent/agent_{agent_id}_obs', obs[agent_id])
 
-            if step % 5 == 0 or args.topo == 'centered':
+            # Centered mode
+            if step < 100:
                 start_time = time.time()
                 topo.sender_send(net)
                 trans_time = np.round(time.time() - start_time, 3)
-                trans_times.append(trans_time)
-                print(f'one pass time: {trans_time}')
+                centered_trans_times.append(trans_time)
+                centered_net_flow += net_flow_cnt()
+                print(f'one pass time(centered mode): {trans_time}')
                 for receiver in topo.receive_pros:
                     logging.info(f'---------------------receiver status: {receiver.stdout.readlines()}')
+            elif step == 100:
+                for rp in topo.receive_pros:
+                    rp.terminate()
+                CLI(net)
+                # Switch to Grouped Topo
+                net.stop()
+                topo = GroupedMultiLinkTopo()
+                net = Mininet(topo=topo)
+                net.start()
+                topo.receiver_set_up(net)
+                # CLI(net)
+            # Hybrid mode
+            else:
+                if step % 5 == 0:
+                    start_time = time.time()
+                    topo.sender_send(net)
+                    trans_time = np.round(time.time() - start_time, 3)
+                    hybrid_trans_times.append(trans_time)
+                    hybrid_net_flow += net_flow_cnt()
+                    print(f'one pass time(Hybrid mode): {trans_time}')
+                    for receiver in topo.receive_pros:
+                        logging.info(f'---------------------receiver status: {receiver.stdout.readlines()}')
 
             print('---------------------------------step------------------------------------')
 
     for rp in topo.receive_pros:
         rp.terminate()
-    env.close()
     net.stop()
+    env.close()
 
-    draw_plot(trans_times)
+    draw_plot(centered_trans_times, hybrid_trans_times, centered_net_flow, hybrid_net_flow)
+
 
 if __name__ == "__main__":
     env = StarCraft2Env(map_name="MMM", debug=False)
